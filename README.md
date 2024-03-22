@@ -1,7 +1,3 @@
-# base64 (C++)
-
-Base64 encoding and decoding with c++
-
-## See also
-
-https://renenyffenegger.ch/notes/development/Base64/Encoding-and-decoding-base-64-with-cpp
+using api in [pokedex repository](https://github.com/Jotunn9025/Pokedex)\
+every 60 seconds we take a picture and call that api\
+and print output on serial monitor
