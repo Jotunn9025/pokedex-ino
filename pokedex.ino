@@ -1,7 +1,7 @@
 #include "esp_camera.h"
 #include <Arduino.h>
-#include "Base64.h"
 #include <WiFi.h>
+#include <HTTPClient.h>
 
 #define CAMERA_MODEL_AI_THINKER
 #define PWDN_GPIO_NUM     32
@@ -25,40 +25,26 @@
 
 const char* ssid = "name";
 const char* password = "password";
+const char* server = "api url";
+const int port = 5000;
+const char* endpoint = "/predict";
 
-void custom_base64_encode(char *output, const char *input, int inputLen) {
-  const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  int i = 0, j = 0;
-  unsigned char char_array_3[3], char_array_4[4];
+String customBase64Encode(const uint8_t* data, size_t len) {
+  const char* base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-  while (inputLen--) {
-    char_array_3[i++] = *(input++);
-    if (i == 3) {
-      char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
-      char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
-      char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
-      char_array_4[3] = char_array_3[2] & 0x3f;
+  String encoded;
+  encoded.reserve(((len + 2) / 3) * 4);
 
-      for(i = 0; (i <4) ; i++)
-        output[j++] = base64_chars[char_array_4[i]];
-      i = 0;
-    }
+  for (size_t i = 0; i < len; i += 3) {
+    uint32_t group = (data[i] << 16) | (i + 1 < len ? data[i + 1] << 8 : 0) | (i + 2 < len ? data[i + 2] : 0);
+
+    encoded += base64_chars[(group >> 18) & 0x3F];
+    encoded += base64_chars[(group >> 12) & 0x3F];
+    encoded += i + 1 < len ? base64_chars[(group >> 6) & 0x3F] : '=';
+    encoded += i + 2 < len ? base64_chars[group & 0x3F] : '=';
   }
 
-  if (i) {
-    for(j = i; j < 3; j++)
-      char_array_3[j] = '\0';
-
-    char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
-    char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
-    char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
-
-    for (j = 0; (j < i + 1); j++)
-      output[j] = base64_chars[char_array_4[j]];
-
-    while((i++ < 3))
-      output[j++] = '=';
-  }
+  return encoded;
 }
 
 void setup() {
@@ -68,9 +54,9 @@ void setup() {
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
-    Serial.println("connecting to wifi");
+    Serial.println("Connecting to WiFi...");
   }
-  Serial.println("connected to wifi");
+  Serial.println("Connected to WiFi");
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -93,8 +79,8 @@ void setup() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  
-  if(psramFound()){
+
+  if (psramFound()) {
     config.frame_size = FRAMESIZE_UXGA;
     config.jpeg_quality = 10;
     config.fb_count = 2;
@@ -113,10 +99,6 @@ void setup() {
   captureLoop();
 }
 
-size_t calcBase64EncLen(size_t len) {
-  return 4 * ((len + 2) / 3);
-}
-
 void captureLoop() {
   unsigned long previousMillis = 0;
   Serial.println("Inside captureLoop");
@@ -130,24 +112,36 @@ void captureLoop() {
         continue;
       }
 
-      size_t encodedSize = calcBase64EncLen(fb->len);
-      char *encodedImage = (char *)malloc(encodedSize);
-      if (!encodedImage) {
-        free(fb->buf);
-        esp_camera_fb_return(fb);
-        continue;
-      }
-      custom_base64_encode(encodedImage, (char *)fb->buf, fb->len);
+      String encodedImage = customBase64Encode(fb->buf, fb->len);
 
       Serial.println("Base64 Encoded Image:");
       Serial.println(encodedImage);
 
-      free(encodedImage);
-      free(fb->buf);
+      HTTPClient http;
+      http.begin("http://" + String(server) + ":" + String(port) + endpoint);
+      
+
+      http.addHeader("Content-Type", "application/json");
+
+      String payload = "{\"data\":\"";
+      payload += encodedImage;
+      payload += "\"}";
+
+      int httpCode = http.POST(payload);
+
+      if (httpCode > 0) {
+        String response = http.getString();
+        Serial.println("API Response:");
+        Serial.println(response);
+      } else {
+        Serial.print("HTTP error code: ");
+        Serial.println(httpCode);
+      }
+
+      http.end();
       esp_camera_fb_return(fb);
     }
   }
 }
 
-void loop() {
-}
+void loop() {}
